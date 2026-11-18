@@ -1,0 +1,92 @@
+name: Build Android APK from ZIP
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Find and unzip project
+        shell: bash
+        run: |
+          set -e
+
+          ZIP_FILE=$(find . -maxdepth 2 -type f -iname "*.zip" | head -n 1)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "❌ ZIP file नहीं मिली"
+            exit 1
+          fi
+
+          echo "📦 ZIP found: $ZIP_FILE"
+
+          mkdir -p android-project
+          unzip -o "$ZIP_FILE" -d android-project
+
+          echo "📂 Extracted files:"
+          find android-project -maxdepth 3 -type f | head -100
+
+      - name: Detect Android project
+        shell: bash
+        run: |
+          set -e
+
+          GRADLE_FILE=$(find android-project -name "gradlew" -type f | head -n 1)
+
+          if [ -z "$GRADLE_FILE" ]; then
+            echo "❌ gradlew नहीं मिला। ZIP में valid Android/Gradle project होना चाहिए।"
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$GRADLE_FILE")
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+          chmod +x "$GRADLE_FILE"
+
+          echo "✅ Android project found:"
+          echo "$PROJECT_DIR"
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Build Debug APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --stacktrace
+
+      - name: Find APK
+        shell: bash
+        run: |
+          echo "🔎 Searching APK..."
+          find "${{ env.PROJECT_DIR }}" -type f -name "*.apk" -print
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sort-Everything-APK
+          path: |
+            ${{ env.PROJECT_DIR }}/**/build/outputs/apk/**/*.apk
+          if-no-files-found: error
+
+      - name: Build completed
+        run: |
+          echo "======================================"
+          echo "✅ APK BUILD SUCCESSFUL"
+          echo "📦 GitHub Actions → Artifacts में APK मिलेगा"
+          echo "======================================"
